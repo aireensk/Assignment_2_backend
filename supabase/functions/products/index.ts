@@ -7,103 +7,72 @@ const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
 serve(async (req: Request) => {
-  // Simple content-type header is all we need
+  // Simple content-type header
   const headers = { "Content-Type": "application/json" };
 
   try {
+    // Handle GET request - fetch products with optional filters
     if (req.method === "GET") {
-      const { search, category, lowStock } = new URL(req.url).searchParams;
-
+      const url = new URL(req.url);
+      const category = url.searchParams.get("category");  // Get category filter
+      const search = url.searchParams.get("search");  // Get search query
+      
       let query = supabase.from("products").select("*").order("created_at", { ascending: false });
 
-      // Apply search filter (if provided)
-      if (search) query = query.ilike("name", `%${search}%`);
+      // Apply category filter if provided
+      if (category) {
+        query = query.eq("category", category);
+      }
 
-      // Filter by category (if provided)
-      if (category) query = query.eq("category", category);
-
-      // Fetch only low stock products (if requested)
-      if (lowStock) query = query.lt("quantity", 5); // Example: Low stock is less than 5
+      // Apply search filter if provided (search by product name)
+      if (search) {
+        query = query.ilike("name", `%${search}%`);
+      }
 
       const { data, error } = await query;
+
       if (error) throw error;
       return new Response(JSON.stringify(data), { headers });
     }
 
-    // Add a new product
+    // Handle POST request - add product to basket
     if (req.method === "POST") {
-      const { name, quantity, category } = await req.json();
-      const { error } = await supabase.from("products").insert([{ name, quantity, category }]);
+      const { session_id, product_id, quantity } = await req.json();
+
+      // Check if the product is available in stock (quantity check)
+      const { data: product, error: productError } = await supabase
+        .from("products")
+        .select("quantity")
+        .eq("id", product_id)
+        .single();
+
+      if (productError) throw productError;
+
+      if (product && product.quantity < quantity) {
+        return new Response(
+          JSON.stringify({ error: "Not enough stock available" }),
+          { status: 400, headers }
+        );
+      }
+
+      // Add the product to the basket
+      const { error } = await supabase.from("basket").insert([{ session_id, product_id, quantity }]);
 
       if (error) throw error;
-      return new Response(JSON.stringify({ success: true, message: "Product added!" }), { headers });
-    }
-
-    // Delete a product by ID
-    if (req.method === "DELETE") {
-      const { id } = await req.json();
-      const { error } = await supabase.from("products").delete().eq("id", id);
-
-      if (error) throw error;
-      return new Response(JSON.stringify({ success: true, message: "Product deleted!" }), { headers });
-    }
-
-    // Update product quantity by ID
-    if (req.method === "PATCH") {
-      const { id, quantity } = await req.json();
-      const { error } = await supabase.from("products").update({ quantity }).eq("id", id);
-
-      if (error) throw error;
-      return new Response(JSON.stringify({ success: true, message: "Product quantity updated!" }), { headers });
-    }
-
-    // Handle user sign-up
-    if (req.method === "POST" && req.url.includes("/signup")) {
-      const { email, password } = await req.json();
-      const { error } = await supabase.auth.signUp({ email, password });
-
-      if (error) throw error;
-      return new Response(JSON.stringify({ success: true, message: "User registered!" }), { headers });
-    }
-
-    // Handle user login
-    if (req.method === "POST" && req.url.includes("/login")) {
-      const { email, password } = await req.json();
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
-      if (error) throw error;
-      return new Response(JSON.stringify({ success: true, token: data.session?.access_token }), { headers });
-    }
-
-    // Place an order
-    if (req.method === "POST" && req.url.includes("/order")) {
-      const { userId, items } = await req.json();
-      const { error } = await supabase.from("orders").insert([{ user_id: userId, items }]);
-
-      if (error) throw error;
-      return new Response(JSON.stringify({ success: true, message: "Order placed!" }), { headers });
-    }
-
-    // Add item to cart
-    if (req.method === "POST" && req.url.includes("/cart")) {
-      const { userId, productId, quantity } = await req.json();
-      const { error } = await supabase.from("cart").insert([{ user_id: userId, product_id: productId, quantity }]);
-
-      if (error) throw error;
-      return new Response(JSON.stringify({ success: true, message: "Item added to cart!" }), { headers });
+      return new Response(JSON.stringify({ success: true, message: "Product added to basket!" }), { headers });
     }
 
     // Handle unsupported methods
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
-      headers
+      headers,
     });
 
   } catch (error) {
-    const errorproduct = error instanceof Error ? error.product : "Unknown error";
-    return new Response(JSON.stringify({ error: errorproduct }), {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
-      headers
+      headers,
     });
   }
 });

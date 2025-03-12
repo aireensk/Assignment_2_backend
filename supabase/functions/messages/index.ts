@@ -9,7 +9,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 serve(async (req: Request) => {
   // Simple content-type header is all we need
   const headers = { "Content-Type": "application/json" };
-
+  
   try {
     // Handle GET request - fetch messages
     if (req.method === "GET") {
